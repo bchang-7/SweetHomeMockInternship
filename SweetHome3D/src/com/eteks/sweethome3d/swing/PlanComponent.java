@@ -2002,12 +2002,38 @@ public class PlanComponent extends JComponent implements PlanView, Scrollable, P
     }
     return strokeWidth;
   }
-  
+
   /**
-   * Prints this component plan at the scale given in the home print attributes or at a scale 
+   * Prints this component plan at the scale given in the home print attributes or at a scale
    * that makes it fill <code>pageFormat</code> imageable size if this attribute is <code>null</code>.
+   * Prints every viewable level in order and restores the selected level afterwards.
    */
   public int print(Graphics g, PageFormat pageFormat, int pageIndex) {
+    List<Level> printedLevels = getPrintedLevels();
+    if (printedLevels.isEmpty()) {
+      // Home without levels: print its plan as before
+      return printSelectedLevel(g, pageFormat, pageIndex);
+    }
+    Level selectedLevel = this.home.getSelectedLevel();
+    try {
+      int levelFirstPageIndex = 0;
+      for (Level level : printedLevels) {
+        // Painted items depend on the selected level, so select each level temporarily
+        this.home.setSelectedLevel(level);
+        int levelPageCount = getSelectedLevelPrintPageCount(g, pageFormat);
+        if (pageIndex < levelFirstPageIndex + levelPageCount) {
+          return printSelectedLevel(g, pageFormat, pageIndex - levelFirstPageIndex);
+        }
+        levelFirstPageIndex += levelPageCount;
+      }
+      return NO_SUCH_PAGE;
+    } finally {
+      // Always restore the level selected before printing, even if printing fails
+      this.home.setSelectedLevel(selectedLevel);
+    }
+  }
+
+  private int printSelectedLevel(Graphics g, PageFormat pageFormat, int pageIndex) {
     List<Selectable> printedItems = getPaintedItems(); 
     Rectangle2D printedItemBounds = getItemsBounds(g, printedItems);
     if (printedItemBounds != null) {
@@ -2074,7 +2100,42 @@ public class PlanComponent extends JComponent implements PlanView, Scrollable, P
       return NO_SUCH_PAGE;
     }
   }
-  
+
+  /**
+   * Returns the viewable levels of the home in their order (empty if the home has no levels).
+   */
+  private List<Level> getPrintedLevels() {
+    List<Level> printedLevels = new ArrayList<Level>();
+    for (Level level : this.home.getLevels()) {
+      if (level.isViewable()) {
+        printedLevels.add(level);
+      }
+    }
+    return printedLevels;
+  }
+
+  /**
+   * Returns how many pages the plan at the selected level needs.
+   */
+  private int getSelectedLevelPrintPageCount(Graphics g, PageFormat pageFormat) {
+    Rectangle2D printedItemBounds = getItemsBounds(g, getPaintedItems());
+    if (printedItemBounds == null) {
+      return 0;
+    } else if (this.home.getPrint() == null || this.home.getPrint().getPlanScale() == null) {
+      return 1;
+    } else {
+      float printScale = this.home.getPrint().getPlanScale().floatValue() * LengthUnit.centimeterToInch(72);
+      int pagesPerRow = (int)(printedItemBounds.getWidth() * printScale / pageFormat.getImageableWidth());
+      if (printedItemBounds.getWidth() * printScale != pageFormat.getImageableWidth()) {
+        pagesPerRow++;
+      }
+      int pagesPerColumn = (int)(printedItemBounds.getHeight() * printScale / pageFormat.getImageableHeight());
+      if (printedItemBounds.getHeight() * printScale != pageFormat.getImageableHeight()) {
+        pagesPerColumn++;
+      }
+      return pagesPerRow * pagesPerColumn;
+    }
+  }
   /**
    * Returns an image of the selected items displayed by this component 
    * (camera excepted) with no outline at scale 1/1 (1 pixel = 1cm).
